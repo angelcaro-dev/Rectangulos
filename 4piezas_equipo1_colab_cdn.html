@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>4 piezas — EQUIPO 1 (CDN)</title>
+  <style>
+    :root { --bg:#f7f8fb; --grid:rgba(0,0,0,.05); --piece:#c8e7ec; --stroke:#34424a; --shadow:rgba(0,0,0,.08); }
+    html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg)}
+    .board{position:absolute;inset:0;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:40px 40px}
+    .toolbar{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;background:#fff;border:1px solid #e6e6e6;border-radius:12px;padding:8px 12px;box-shadow:0 8px 20px rgba(0,0,0,.08);z-index:10}
+    .pill{padding:6px 10px;border:1px solid #e6e6e6;border-radius:999px;background:#fff;cursor:pointer;user-select:none}
+    .presence{position:fixed;right:10px;top:10px;background:#fff;border:1px solid #e6e6e6;border-radius:12px;padding:6px 10px;font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.08);z-index:10}
+    .task{position:fixed;left:40px;top:60px;background:rgba(255,255,255,.95);border:1px solid #e6e6e6;border-radius:12px;padding:10px 14px;max-width:620px;box-shadow:0 8px 20px rgba(0,0,0,.08);z-index:9; line-height:1.4}
+    .piece{position:absolute;width:180px;height:120px;background:var(--piece);border:2px solid var(--stroke);border-radius:4px;box-shadow:0 6px 14px var(--shadow);transform-origin:center center;user-select:none;touch-action:none;will-change: transform;}
+    .handle-rotate{position:absolute;left:50%;top:-22px;transform:translateX(-50%);width:16px;height:16px;border-radius:999px;background:#fff;border:2px solid #111;cursor:grab;display:block}
+    .warn{position:fixed;right:10px;bottom:10px;background:#fff8e1;border:1px solid #e6c200;border-radius:10px;padding:8px 10px;font-size:12px;max-width:480px;box-shadow:0 6px 16px rgba(0,0,0,.08)}
+    .hint{font-size:12px;color:#666;margin-left:8px}
+    .banner{position:absolute;left:24px;bottom:24px; z-index:5;background:#111; color:#fff; padding:10px 16px; border-radius:10px; box-shadow:0 8px 20px rgba(0,0,0,.12);font-weight:700; letter-spacing:.5px; font-size:18px; opacity:.92; pointer-events:none; user-select:none;}
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="pill" id="btn-reset">Reset ejercicio</div>
+    <span class="hint">Sala: <span id="room"></span> · Modo: <span id="mode">cargando…</span></span>
+  </div>
+  <div class="presence">👥 <span id="peers">—</span></div>
+  <div class="task">
+    <strong>Tenemos 4 piezas</strong>. Las puedes mover con el ratón. También las puedes rotar pinchando en el pequeño circulito adyacente.
+  </div>
+  <div id="board" class="board"><div class="banner">EQUIPO 1</div></div>
+  <div id="warn" class="warn" style="display:none"></div>
+
+  <script>
+    // Carga en cascada: jsDelivr -> unpkg (para Yjs + providers)
+    function load(url){return new Promise(r=>{const s=document.createElement('script');s.src=url;s.onload=()=>r(true);s.onerror=()=>r(false);document.head.appendChild(s);});}
+    async function loadY(){ return await load("https://cdn.jsdelivr.net/npm/yjs@13.6.18/dist/yjs.js") || await load("https://unpkg.com/yjs@13.6.18/dist/yjs.js"); }
+    async function loadWS(){ return await load("https://cdn.jsdelivr.net/npm/y-websocket@1.5.4/dist/y-websocket.js") || await load("https://unpkg.com/y-websocket@1.5.4/dist/y-websocket.js"); }
+    async function loadRTC(){ return await load("https://cdn.jsdelivr.net/npm/y-webrtc@10.3.0/dist/y-webrtc.js") || await load("https://unpkg.com/y-webrtc@10.3.0/dist/y-webrtc.js"); }
+
+    (async function start(){
+      const ROOM = new URLSearchParams(location.search).get("room") || "equipo1";
+      document.getElementById("room").textContent = ROOM;
+
+      const warn = document.getElementById("warn");
+      function showWarn(msg){ warn.style.display="block"; warn.innerHTML = msg; }
+
+      const okY = await loadY();
+      if(!okY || !window.Y){ document.getElementById("mode").textContent = "local (falló Yjs-CDN)"; showWarn("No se pudo cargar Yjs desde los CDNs."); return; }
+
+      // Proveedor: intentamos WebRTC y si falla, WebSocket
+      let provider=null, doc=new Y.Doc();
+      let okRTC = await loadRTC();
+      if(okRTC && (window.WebrtcProvider||Y.WebrtcProvider)){
+        provider = new (window.WebrtcProvider||Y.WebrtcProvider)(ROOM, doc, {signaling:['wss://signaling.yjs.dev']});
+        document.getElementById("mode").textContent = "colaborativo (WebRTC)";
+      }else{
+        let okWS = await loadWS();
+        if(okWS && (window.WebsocketProvider||Y.WebsocketProvider)){
+          provider = new (window.WebsocketProvider||Y.WebsocketProvider)("wss://demos.yjs.dev", ROOM, doc);
+          document.getElementById("mode").textContent = "colaborativo (WebSocket)";
+        }else{
+          document.getElementById("mode").textContent = "local (sin proveedores)";
+          showWarn("No se pudo cargar y-webrtc/y-websocket desde los CDNs.");
+        }
+      }
+
+      const board = document.getElementById("board");
+      const map = doc.getMap("rects");
+      const meta = doc.getMap("meta");
+      const peers = document.getElementById("peers");
+      if(provider && provider.awareness){ provider.awareness.on("update", ()=>{ peers.textContent = String(provider.awareness.getStates().size); }); } else { peers.textContent="1"; }
+
+      function apply(el,d){ el.style.transform='translate('+d.x+'px,'+d.y+'px) rotate('+(d.rot||0)+'deg)'; el.style.zIndex=d.z||1; }
+      function makeEl(id){ const el=document.createElement("div"); el.className="piece"; el.dataset.id=id; const h=document.createElement("div"); h.className="handle-rotate"; el.appendChild(h); board.appendChild(el); attach(el,h); return el; }
+
+      const state = new Map();
+      function renderChanged(keys){ keys.forEach((id)=>{ const d=map.get(id); if(!d) return; let e=state.get(id); if(!e){ e={el:makeEl(id)}; state.set(id,e);} apply(e.el,d); }); }
+      map.observe((e)=>{ const changed=[...e.keysChanged]; renderChanged(changed); });
+
+      function seed(){
+        if(map.size>0) return;
+        const y = innerHeight/2-60; [120,340,560,780].forEach((x,i)=>{ const id="p"+i; const d={x,y,rot:0,z:i+1}; map.set(id,d); let e=makeEl(id); state.set(id,{el:e}); apply(e,d); });
+        meta.set("zmax",4);
+      }
+
+      function attach(el,handle){
+        const id = el.dataset.id;
+        el.addEventListener("pointerdown", ()=>{ // bring to front
+          const next = (meta.get("zmax")||1)+1; meta.set("zmax",next);
+          const d={...map.get(id), z:next}; map.set(id,d); apply(el,d);
+        });
+        let drag=false, start=null, orig=null;
+        el.addEventListener("pointerdown",(e)=>{ if(e.button!==0 || e.target===handle) return; drag=true; start={x:e.clientX,y:e.clientY}; orig={...map.get(id)}; el.setPointerCapture(e.pointerId); });
+        addEventListener("pointermove",(e)=>{ if(!drag) return; const dx=e.clientX-start.x, dy=e.clientY-start.y; const d={...orig, x:orig.x+dx, y:orig.y+dy}; map.set(id,d); });
+        addEventListener("pointerup",()=>{ drag=false; });
+        let rot=false, a0=0, origR=null;
+        handle.addEventListener("pointerdown",(e)=>{ if(e.button!==0) return; rot=true; origR={...map.get(id)}; const r=el.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2; a0=Math.atan2(e.clientY-cy,e.clientX-cx); el.setPointerCapture(e.pointerId); e.stopPropagation(); });
+        addEventListener("pointermove",(e)=>{ if(!rot) return; const r=el.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2; const a=Math.atan2(e.clientY-cy,e.clientX-cx); const deg=(origR.rot||0)+((a-a0)*180/Math.PI); const d={...origR, rot:deg}; map.set(id,d); });
+        addEventListener("pointerup",()=>{ rot=false; });
+      }
+
+      document.getElementById("btn-reset").addEventListener("click",()=>{ map.clear(); document.querySelectorAll(".piece").forEach(e=>e.remove()); state.clear(); seed(); });
+      seed();
+    })();
+  </script>
+</body>
+</html>
