@@ -318,12 +318,22 @@
           startTop = parseFloat(p.style.top);
         });
 
+        let lastSyncTime = 0;
+        const SYNC_THROTTLE = 50; // Sincronizar cada 50ms mientras arrastra
+
         p.addEventListener('pointermove', (ev) => {
           if (!dragging) return;
           const dx = ev.clientX - startX;
           const dy = ev.clientY - startY;
           p.style.left = (startLeft + dx) + 'px';
           p.style.top = (startTop + dy) + 'px';
+          
+          // Sincronizar en tiempo real mientras arrastra
+          const now = Date.now();
+          if (now - lastSyncTime > SYNC_THROTTLE) {
+            lastSyncTime = now;
+            syncPiece(i, p);
+          }
         });
 
         p.addEventListener('pointerup', () => {
@@ -360,6 +370,9 @@
           startAngle = angleFromPointer(ev);
         });
 
+        let lastRotateSyncTime = 0;
+        const ROTATE_SYNC_THROTTLE = 50; // Sincronizar cada 50ms mientras rota
+
         h.addEventListener('pointermove', (ev) => {
           if (!rotating) return;
           const current = angleFromPointer(ev);
@@ -367,6 +380,13 @@
           const newAng = baseAngle + diff;
           p.dataset.angle = newAng;
           setRotation(p, newAng);
+          
+          // Sincronizar en tiempo real mientras rota
+          const now = Date.now();
+          if (now - lastRotateSyncTime > ROTATE_SYNC_THROTTLE) {
+            lastRotateSyncTime = now;
+            syncPiece(i, p);
+          }
         });
 
         h.addEventListener('pointerup', () => {
@@ -416,10 +436,17 @@
        */
       function updatePieceFromServer(i, pieceData) {
         if (pieces[i]) {
+          // Añadir transición suave para actualizaciones remotas
+          pieces[i].style.transition = 'left 0.1s ease-out, top 0.1s ease-out';
           pieces[i].style.left = pieceData.left + 'px';
           pieces[i].style.top = pieceData.top + 'px';
           pieces[i].dataset.angle = pieceData.angle || 0;
           setRotation(pieces[i], +pieces[i].dataset.angle);
+          
+          // Quitar transición después de actualizar
+          setTimeout(() => {
+            pieces[i].style.transition = 'box-shadow 0.2s';
+          }, 150);
         }
       }
 
