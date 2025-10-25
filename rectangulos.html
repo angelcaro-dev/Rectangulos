@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>4 piezas – EQUIPO 1 (Colaborativo)</title>
+<style>
+  :root{
+    --bg:#f7f8fb; --grid: rgba(0,0,0,.05);
+    --piece:#cfecee; --stroke:#3a556a; --shadow: rgba(0,0,0,.08);
+  }
+  html,body{ height:100%; margin:0; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:var(--bg); }
+  .board{
+    position:absolute; inset:0; 
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:40px 40px; background-position: -1px -1px;
+  }
+  .toolbar{
+    position:fixed; top:10px; left:50%; transform:translateX(-50%);
+    display:flex; gap:10px; align-items:center; background:#fff;
+    border:1px solid #e6e6e6; border-radius:999px; box-shadow:0 8px 20px rgba(0,0,0,.06);
+    padding:6px 12px; font-size:14px; z-index:10; user-select:none; flex-wrap: wrap;
+    max-width: 90%;
+  }
+  .pill{ padding:6px 12px; border:1px solid #e6e6e6; border-radius:999px; background:#fff; cursor:pointer; font-size:13px; }
+  .pill:hover{ background:#f5f5f5; }
+  .pill:disabled{ opacity:0.5; cursor:not-allowed; }
+  .badge{ font-weight:600; color:#666; font-size:13px; }
+  .msg{ padding:8px 12px; border:1px solid #e6e6e6; background:#fff; border-radius:12px; box-shadow:0 6px 16px rgba(0,0,0,.05); font-size:13px; }
+  .msg b{ font-weight:700; }
+  .status{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .status.online{ background:#22c55e; }
+  .status.connecting{ background:#f59e0b; }
+  .status.offline{ background:#ef4444; }
+
+  .piece{
+    position:absolute; left:0; top:0;
+    width:180px; height:120px;
+    background:var(--piece);
+    border:2px solid var(--stroke);
+    border-radius:0;
+    box-shadow: 0 10px 20px var(--shadow);
+    cursor:grab; touch-action:none; user-select:none;
+    transition: box-shadow 0.2s;
+  }
+  .piece:active{ cursor:grabbing; box-shadow: 0 15px 30px rgba(0,0,0,.15); }
+  .handle-rotate{
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom:-24px; width:16px; height:16px; border:2px solid var(--stroke);
+    border-radius:50%; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.1);
+    cursor:grab; touch-action:none;
+  }
+  .label{
+    position:fixed; left:16px; bottom:16px;
+    background:#000; color:#fff; font-weight:700; padding:10px 14px;
+    border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,.2); letter-spacing:.5px;
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="btnReset" class="pill">Reset ejercicio</button>
+    <span class="msg">
+      <span class="status connecting" id="statusDot"></span>
+      <b>Modo colaborativo.</b> <span id="statusText">Conectando...</span>
+    </span>
+    <span class="badge">Sala: equipo1 · <span id="userCount">-</span> conectados</span>
+  </div>
+  <div id="board" class="board"></div>
+  <div class="label">EQUIPO 1</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getDatabase, ref, set, onValue, update, serverTimestamp, onDisconnect } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBXwvSy8T_7RqL3hqxHwLKGo3QxRj8FeW0",
+  authDomain: "rectangulos-equipo1.firebaseapp.com",
+  databaseURL: "https://rectangulos-equipo1-default-rtdb.firebaseio.com",
+  projectId: "rectangulos-equipo1",
+  storageBucket: "rectangulos-equipo1.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef123456"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const board = document.getElementById('board');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const userCount = document.getElementById('userCount');
+const btnReset = document.getElementById('btnReset');
+
+const MY_USER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
+
+const initialState = [
+  { left: 120, top: 340, angle: 0 },
+  { left: 340, top: 340, angle: 0 },
+  { left: 560, top: 340, angle: 0 },
+  { left: 780, top: 340, angle: 0 },
+];
+
+const pieces = [];
+let isUpdatingFromServer = false;
+
+function setRotation(el, deg){
+  el.style.transform = `rotate(${deg}deg)`;
+}
+
+function createPiece(i, state){
+  const p = document.createElement('div');
+  p.className = 'piece';
+  p.dataset.index = i;
+  p.dataset.angle = state.angle || 0;
+  p.style.left = state.left + 'px';
+  p.style.top  = state.top + 'px';
+  setRotation(p, +p.dataset.angle);
+
+  const h = document.createElement('div');
+  h.className = 'handle-rotate';
+  p.appendChild(h);
+
+  board.appendChild(p);
+
+  let dragging = false;
+  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+  p.addEventListener('pointerdown', (ev) => {
+    if (ev.target === h) return;
+    dragging = true;
+    p.setPointerCapture(ev.pointerId);
+    startX = ev.clientX; startY = ev.clientY;
+    startLeft = parseFloat(p.style.left); startTop = parseFloat(p.style.top);
+  });
+
+  p.addEventListener('pointermove', (ev) => {
+    if (!dragging) return;
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    p.style.left = (startLeft + dx) + 'px';
+    p.style.top  = (startTop + dy) + 'px';
+  });
+
+  p.addEventListener('pointerup', async () => {
+    if (dragging) {
+      dragging = false;
+      await syncPieceToServer(i, p);
+    }
+  });
+  
+  p.addEventListener('pointercancel', () => { dragging = false; });
+
+  let rotating = false;
+  let baseAngle = 0;
+  let startAngle = 0;
+
+  const angleFromPointer = (ev) => {
+    const rect = p.getBoundingClientRect();
+    const cx = rect.left + rect.width/2;
+    const cy = rect.top + rect.height/2;
+    const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180/Math.PI;
+    return ang;
+  };
+
+  h.addEventListener('pointerdown', (ev) => {
+    ev.stopPropagation();
+    rotating = true;
+    h.setPointerCapture(ev.pointerId);
+    baseAngle = +p.dataset.angle;
+    startAngle = angleFromPointer(ev);
+  });
+
+  h.addEventListener('pointermove', (ev) => {
+    if(!rotating) return;
+    const current = angleFromPointer(ev);
+    const diff = current - startAngle;
+    const newAng = baseAngle + diff;
+    p.dataset.angle = newAng;
+    setRotation(p, newAng);
+  });
+
+  h.addEventListener('pointerup', async () => {
+    if (rotating) {
+      rotating = false;
+      await syncPieceToServer(i, p);
+    }
+  });
+  
+  h.addEventListener('pointercancel', () => { rotating = false; });
+
+  pieces.push(p);
+}
+
+async function syncPieceToServer(index, pieceEl) {
+  if (isUpdatingFromServer) return;
+  
+  const pieceData = {
+    left: parseFloat(pieceEl.style.left),
+    top: parseFloat(pieceEl.style.top),
+    angle: parseFloat(pieceEl.dataset.angle)
+  };
+  
+  await update(ref(db, `pieces/${index}`), pieceData);
+}
+
+function updateFromServer(snapshot) {
+  if (!snapshot.exists()) return;
+  
+  isUpdatingFromServer = true;
+  const state = snapshot.val();
+  
+  Object.keys(state).forEach(key => {
+    const i = parseInt(key);
+    if (pieces[i] && state[i]) {
+      pieces[i].style.left = state[i].left + 'px';
+      pieces[i].style.top = state[i].top + 'px';
+      pieces[i].dataset.angle = state[i].angle || 0;
+      setRotation(pieces[i], +pieces[i].dataset.angle);
+    }
+  });
+  
+  setTimeout(() => { isUpdatingFromServer = false; }, 100);
+}
+
+async function resetPieces() {
+  btnReset.disabled = true;
+  const updates = {};
+  initialState.forEach((piece, i) => {
+    updates[`pieces/${i}`] = piece;
+  });
+  await update(ref(db), updates);
+  setTimeout(() => { btnReset.disabled = false; }, 500);
+}
+
+async function updatePresence() {
+  const userRef = ref(db, `users/${MY_USER_ID}`);
+  await set(userRef, serverTimestamp());
+  onDisconnect(userRef).remove();
+}
+
+function setupPresenceListener() {
+  onValue(ref(db, 'users'), (snapshot) => {
+    if (snapshot.exists()) {
+      const users = snapshot.val();
+      const now = Date.now();
+      const activeUsers = Object.values(users).filter(timestamp => {
+        return timestamp && (now - timestamp < 30000);
+      }).length;
+      userCount.textContent = activeUsers || 1;
+    } else {
+      userCount.textContent = '1';
+    }
+  });
+}
+
+async function init() {
+  try {
+    statusDot.className = 'status connecting';
+    statusText.textContent = 'Conectando...';
+    
+    const piecesRef = ref(db, 'pieces');
+    
+    onValue(piecesRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        const updates = {};
+        initialState.forEach((piece, i) => {
+          updates[`pieces/${i}`] = piece;
+        });
+        update(ref(db), updates);
+        
+        for(let i=0; i<4; i++) {
+          createPiece(i, initialState[i]);
+        }
+      } else {
+        const state = snapshot.val();
+        if (pieces.length === 0) {
+          Object.keys(state).forEach(key => {
+            const i = parseInt(key);
+            createPiece(i, state[i]);
+          });
+        } else {
+          updateFromServer(snapshot);
+        }
+      }
+      
+      statusDot.className = 'status online';
+      statusText.textContent = 'Todos pueden mover y rotar las piezas en tiempo real.';
+    }, (error) => {
+      console.error('Error:', error);
+      statusDot.className = 'status offline';
+      statusText.textContent = 'Error de conexión';
+    });
+    
+    await updatePresence();
+    setInterval(updatePresence, 20000);
+    setupPresenceListener();
+    
+  } catch (e) {
+    console.error('Error de inicialización:', e);
+    statusDot.className = 'status offline';
+    statusText.textContent = 'Error al conectar';
+  }
+}
+
+btnReset.addEventListener('click', resetPieces);
+
+init();
+</script>
+</body>
+</html>
