@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Equipo 1 — Colaborativo (fixed)</title>
+  <!-- Carga principal (jsDelivr) con @latest -->
+  <script src="https://cdn.jsdelivr.net/npm/yjs@latest/dist/yjs.js" onerror="window.__YJS_ERR=1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/y-webrtc@latest/dist/y-webrtc.js" onerror="window.__YWE_ERR=1"></script>
+  <style>
+    :root{ --radius: 0px; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial, sans-serif; background:#0b0e13; color:#e5e7eb; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-bottom:1px solid #232734; background:#0f1219; }
+    header h1{ margin:0; font-size:16px; }
+    .bar{ display:flex; align-items:center; gap:8px; }
+    .pill{ border:1px solid #2a2f3a; padding:4px 8px; border-radius: var(--radius); color:#9aa2b2; font-size:12px; }
+    .ok{ color:#a7f3d0; border-color:#065f46; }
+    .warn{ color:#fde68a; border-color:#92400e; }
+    .err{ color:#fecaca; border-color:#7f1d1d; }
+    .container{ position:relative; width:100%; height: calc(100vh - 46px); overflow:auto; }
+    .board{ position:relative; width:1600px; height:1000px; }
+    .hint{ position:absolute; left:12px; bottom:12px; font-size:12px; color:#9aa2b2; background:#0f1219; border:1px solid #232734; padding:6px 8px; border-radius:var(--radius); }
+    .box{ position:absolute; min-width:180px; min-height:110px; border:1px solid #2a2f3a; background:#111525; border-radius: var(--radius); user-select:none; }
+    .box .header{ cursor:grab; padding:8px 10px; font-weight:600; border-bottom:1px solid #232734; background:#121723; }
+    .box.dragging .header{ cursor:grabbing; }
+    .box .content{ padding:10px; color:#c8ceda; }
+    .box .content[contenteditable="true"]{ outline:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Equipo 1 — Colaborativo</h1>
+    <div class="bar">
+      <span class="pill" id="status">Cargando…</span>
+      <span class="pill" id="peers">Conectados: 0</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <div id="board" class="board"></div>
+    <div class="hint" id="hint">Arrastra por la barra superior · Doble clic para editar · Todos ven los cambios en tiempo real</div>
+  </div>
+
+  <script>
+  (function(){
+    const statusEl = document.getElementById('status');
+    const peersEl  = document.getElementById('peers');
+    const board    = document.getElementById('board');
+    const hintEl   = document.getElementById('hint');
+
+    function setStatus(text, cls){ statusEl.textContent = text; statusEl.className = 'pill ' + (cls||''); }
+
+    const defaults = [
+      ["box1",{x:60,y:60,w:240,h:140,title:"Rectángulo 1",text:"Doble clic para editar"}],
+      ["box2",{x:340,y:80,w:260,h:160,title:"Rectángulo 2",text:"Mover = barra superior"}],
+      ["box3",{x:80,y:280,w:260,h:150,title:"Rectángulo 3",text:"Esquinas en pico"}]
+    ];
+
+    function mountStatic(){
+      setStatus('Modo sin colaboración (fallback)', 'warn');
+      peersEl.textContent = 'Conectados: 1';
+      defaults.forEach(([id,d]) => {
+        const el = document.createElement('div');
+        el.id = id; el.className = 'box';
+        el.style.left = d.x + 'px'; el.style.top = d.y + 'px';
+        el.style.width = d.w + 'px'; el.style.height = d.h + 'px';
+        el.innerHTML = '<div class="header"></div><div class="content" contenteditable="false"></div>';
+        el.querySelector('.header').textContent = d.title;
+        el.querySelector('.content').textContent = d.text;
+        board.appendChild(el);
+
+        let drag=false, sx=0, sy=0, sl=0, st=0;
+        const hd = el.querySelector('.header');
+        hd.addEventListener('pointerdown', (e)=>{ drag=true; el.classList.add('dragging'); sx=e.clientX; sy=e.clientY; sl=parseFloat(el.style.left||0); st=parseFloat(el.style.top||0); e.preventDefault(); });
+        window.addEventListener('pointermove', (e)=>{ if(!drag) return; el.style.left = (sl + e.clientX - sx) + 'px'; el.style.top = (st + e.clientY - sy) + 'px'; });
+        window.addEventListener('pointerup', ()=>{ drag=false; el.classList.remove('dragging'); });
+
+        const ct = el.querySelector('.content');
+        ct.addEventListener('dblclick', ()=>{ ct.setAttribute('contenteditable','true'); ct.focus(); document.execCommand('selectAll', false, null); });
+        ct.addEventListener('blur', ()=>{ ct.removeAttribute('contenteditable'); });
+        ct.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ct.blur(); }});
+      });
+      hintEl.textContent = 'Modo sin colaboración: si quieres colaboración en tiempo real, abre esta página online y verifica que las librerías no estén bloqueadas por la red.';
+    }
+
+    function initCollab(){
+      const Y = window.Y;
+      const ywebrtc = window.ywebrtc;
+      if(!Y || !ywebrtc){ mountStatic(); return; }
+
+      const ydoc = new Y.Doc();
+      const provider = new ywebrtc.WebrtcProvider('rectangulos-equipo1', ydoc, {
+        signaling: ['wss://signaling.yjs.dev','wss://y-webrtc-signaling-eu.herokuapp.com'],
+        config: { iceServers: [{urls: 'stun:stun.l.google.com:19302'}] }
+      });
+      const awareness = provider.awareness;
+      const boxes = ydoc.getMap('boxes');
+
+      // Semilla si la sala está vacía
+      Y.transact(ydoc, () => {
+        if (boxes.size === 0) {
+          defaults.forEach(([id,d]) => {
+            const m = new Y.Map();
+            m.set('x',d.x); m.set('y',d.y); m.set('w',d.w); m.set('h',d.h);
+            m.set('title',d.title); m.set('text',d.text);
+            boxes.set(id,m);
+          });
+        }
+      });
+
+      function mountBox(id, ymap){
+        let el = document.getElementById(id);
+        if(!el){
+          el = document.createElement('div');
+          el.id = id; el.className = 'box';
+          el.innerHTML = '<div class="header"></div><div class="content" contenteditable="false"></div>';
+          board.appendChild(el);
+
+          let drag=false, sx=0, sy=0, sl=0, st=0;
+          const hd = el.querySelector('.header');
+          hd.addEventListener('pointerdown', (e)=>{
+            drag=true; el.classList.add('dragging');
+            sx=e.clientX; sy=e.clientY; sl=parseFloat(el.style.left||0); st=parseFloat(el.style.top||0);
+            e.preventDefault();
+          });
+          window.addEventListener('pointermove', (e)=>{
+            if(!drag) return;
+            const nx = sl + (e.clientX - sx);
+            const ny = st + (e.clientY - sy);
+            el.style.left = nx + 'px'; el.style.top = ny + 'px';
+            ymap.set('x', nx); ymap.set('y', ny);
+          });
+          window.addEventListener('pointerup', ()=>{ drag=false; el.classList.remove('dragging'); });
+
+          const ct = el.querySelector('.content');
+          ct.addEventListener('dblclick', ()=>{ ct.setAttribute('contenteditable','true'); ct.focus(); document.execCommand('selectAll', false, null); });
+          ct.addEventListener('blur', ()=>{ ct.removeAttribute('contenteditable'); ymap.set('text', ct.innerText); });
+          ct.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ct.blur(); }});
+
+          ymap.observe(()=> apply(el, ymap));
+        }
+        apply(el, ymap);
+      }
+
+      function apply(el, ymap){
+        el.style.left = (ymap.get('x')||0) + 'px';
+        el.style.top  = (ymap.get('y')||0) + 'px';
+        el.style.width  = (ymap.get('w')||200) + 'px';
+        el.style.height = (ymap.get('h')||120) + 'px';
+        el.querySelector('.header').textContent = ymap.get('title') || 'Rectángulo';
+        el.querySelector('.content').textContent = ymap.get('text') || '';
+      }
+
+      function renderAll(){
+        boxes.forEach((m,id)=> mountBox(id,m));
+        Array.from(board.children).forEach(el => { if(!boxes.has(el.id)) el.remove(); });
+      }
+      boxes.observe(renderAll);
+      renderAll();
+
+      function updPeers(){
+        const n = awareness.getStates().size;
+        peersEl.textContent = 'Conectados: ' + n;
+        setStatus(n > 0 ? 'Colaboración activa' : 'Conectando…', n>0 ? 'ok' : '');
+      }
+      awareness.on('change', updPeers);
+      updPeers();
+    }
+
+    // Forzar modo local si ?solo
+    if (new URLSearchParams(location.search).has('solo')) {
+      setStatus('Modo solo (forzado por ?solo)', 'warn'); mountStatic(); return;
+    }
+
+    // Si ya están las libs
+    if (window.Y && window.ywebrtc){ setStatus('Librerías cargadas', 'ok'); initCollab(); return; }
+
+    // Fallback a unpkg @latest
+    setStatus('Cargando librerías…', '');
+    const head = document.head;
+    function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; head.appendChild(s); }); }
+
+    (async function(){
+      try{
+        if(!window.Y){ await loadScript('https://unpkg.com/yjs@latest/dist/yjs.js'); }
+        if(!window.ywebrtc){ await loadScript('https://unpkg.com/y-webrtc@latest/dist/y-webrtc.js'); }
+      }catch(e){ /* ignore */ }
+      if(window.Y && window.ywebrtc){ setStatus('Librerías cargadas', 'ok'); initCollab(); }
+      else{ setStatus('No se pudieron cargar librerías (usando fallback sin colaboración)', 'err'); mountStatic(); }
+    })();
+  })();
+  </script>
+</body>
+</html>
