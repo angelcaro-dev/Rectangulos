@@ -1,13 +1,12 @@
-<!DOCTYPE html>  
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>4 piezas – EQUIPO 1 (Colaborativo)</title>
   
-  <!-- Y.js para sincronización automática en tiempo real -->
-  <script src="https://cdn.jsdelivr.net/npm/yjs@13.6.8/dist/yjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/y-webrtc@10.2.5/dist/y-webrtc.min.js"></script>
+  <!-- Supabase Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <style>
     /* ========================================
@@ -100,7 +99,7 @@
       font-weight: 700;
     }
 
-    /* Indicadores de estado de conexión */
+    /* Indicadores de estado */
     .status {
       display: inline-block;
       width: 8px;
@@ -184,10 +183,10 @@
   <div class="toolbar">
     <button id="btnReset" class="pill">Reset ejercicio</button>
     <span class="msg">
-      <span class="status online" id="statusDot"></span>
-      <b>Modo colaborativo.</b> Todos pueden mover y rotar las piezas en tiempo real.
+      <span class="status connecting" id="statusDot"></span>
+      <b>Modo colaborativo.</b> <span id="statusText">Conectando...</span>
     </span>
-    <span class="badge">Sala: EQUIPO1 · <span id="userCount">1</span> conectados</span>
+    <span class="badge">Sala: EQUIPO1 · Sincronización en tiempo real</span>
   </div>
 
   <!-- Tablero donde se colocan las piezas -->
@@ -204,58 +203,37 @@
       'use strict';
 
       // ========================================
-      // CONSTANTES Y CONFIGURACIÓN
+      // CONFIGURACIÓN DE SUPABASE
       // ========================================
       
-      const ROOM = 'rectangulos-equipo1'; // Nombre único de la sala
+      const SUPABASE_URL = 'https://spvnbssyihyoxptnkjjj.supabase.co';
+      const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNwdm5ic3N5aWh5b3hwdG5rampqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDQ1NDAsImV4cCI6MjA3Njk4MDU0MH0.ERHGsA7jVsQw4gSFRY633wBxr4dhqXSq8-5gtxVqdXs';
+      
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+      // ========================================
+      // CONSTANTES Y CONFIGURACIÓN
+      // ========================================
       
       // Elementos del DOM
       const board = document.getElementById('board');
       const statusDot = document.getElementById('statusDot');
-      const userCount = document.getElementById('userCount');
+      const statusText = document.getElementById('statusText');
 
       // Posiciones iniciales de las 4 piezas
       const initialState = [
-        { left: 120, top: 340, angle: 0 },
-        { left: 340, top: 340, angle: 0 },
-        { left: 560, top: 340, angle: 0 },
-        { left: 780, top: 340, angle: 0 },
+        { piece_index: 0, left: 120, top: 340, angle: 0 },
+        { piece_index: 1, left: 340, top: 340, angle: 0 },
+        { piece_index: 2, left: 560, top: 340, angle: 0 },
+        { piece_index: 3, left: 780, top: 340, angle: 0 },
       ];
 
       // ========================================
-      // INICIALIZAR Y.JS PARA COLABORACIÓN
+      // VARIABLES DE ESTADO
       // ========================================
       
-      const ydoc = new Y.Doc();
-      const provider = new WebrtcProvider(ROOM, ydoc, {
-        signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com']
-      });
-      
-      const ymap = ydoc.getMap('pieces'); // Mapa compartido para las piezas
       const pieces = []; // Array de elementos DOM
-      let isUpdatingFromRemote = false; // Previene bucles infinitos
-
-      // ========================================
-      // INICIALIZAR ESTADO SI ES EL PRIMERO
-      // ========================================
-      
-      if (ymap.size === 0) {
-        initialState.forEach((state, i) => {
-          ymap.set(String(i), state);
-        });
-      }
-
-      // ========================================
-      // MONITOREAR CONEXIONES
-      // ========================================
-      
-      provider.on('synced', () => {
-        statusDot.className = 'status online';
-      });
-
-      provider.on('peers', (peers) => {
-        userCount.textContent = peers.webrtcPeers.size + 1;
-      });
+      let isUpdatingFromServer = false; // Previene bucles infinitos
 
       // ========================================
       // FUNCIONES AUXILIARES
@@ -263,11 +241,40 @@
 
       /**
        * Aplica rotación CSS a un elemento
-       * @param {HTMLElement} el - Elemento a rotar
-       * @param {number} deg - Grados de rotación
        */
       function setRotation(el, deg) {
         el.style.transform = `rotate(${deg}deg)`;
+      }
+
+      // ========================================
+      // INICIALIZAR BASE DE DATOS
+      // ========================================
+
+      async function initializeDatabase() {
+        try {
+          // Verificar si ya hay datos
+          const { data, error } = await supabase
+            .from('pieces')
+            .select('*');
+
+          if (error) throw error;
+
+          // Si no hay datos, insertar los iniciales
+          if (!data || data.length === 0) {
+            const { error: insertError } = await supabase
+              .from('pieces')
+              .insert(initialState);
+            
+            if (insertError) throw insertError;
+            
+            return initialState;
+          }
+
+          return data.sort((a, b) => a.piece_index - b.piece_index);
+        } catch (error) {
+          console.error('Error inicializando base de datos:', error);
+          return initialState;
+        }
       }
 
       // ========================================
@@ -276,8 +283,6 @@
 
       /**
        * Crea una pieza rectangular interactiva
-       * @param {number} i - Índice de la pieza
-       * @param {Object} state - Estado inicial {left, top, angle}
        */
       function createPiece(i, state) {
         // Crear elemento de la pieza
@@ -304,7 +309,7 @@
         let startX = 0, startY = 0, startLeft = 0, startTop = 0;
 
         p.addEventListener('pointerdown', (ev) => {
-          if (ev.target === h) return; // El círculo se maneja aparte
+          if (ev.target === h) return;
           dragging = true;
           p.setPointerCapture(ev.pointerId);
           startX = ev.clientX;
@@ -324,7 +329,7 @@
         p.addEventListener('pointerup', () => {
           if (dragging) {
             dragging = false;
-            syncPiece(i, p); // Sincronizar con otros usuarios
+            syncPiece(i, p);
           }
         });
 
@@ -340,15 +345,11 @@
         let baseAngle = 0;
         let startAngle = 0;
 
-        /**
-         * Calcula el ángulo desde el centro de la pieza hasta el puntero
-         */
         const angleFromPointer = (ev) => {
           const rect = p.getBoundingClientRect();
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
-          const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI;
-          return ang;
+          return Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI;
         };
 
         h.addEventListener('pointerdown', (ev) => {
@@ -371,7 +372,7 @@
         h.addEventListener('pointerup', () => {
           if (rotating) {
             rotating = false;
-            syncPiece(i, p); // Sincronizar con otros usuarios
+            syncPiece(i, p);
           }
         });
 
@@ -383,31 +384,37 @@
       }
 
       // ========================================
-      // SINCRONIZACIÓN CON OTROS USUARIOS
+      // SINCRONIZACIÓN CON SUPABASE
       // ========================================
 
       /**
-       * Envía la posición actualizada de una pieza
-       * @param {number} index - Índice de la pieza
-       * @param {HTMLElement} pieceEl - Elemento DOM de la pieza
+       * Sincroniza una pieza con la base de datos
        */
-      function syncPiece(index, pieceEl) {
-        if (isUpdatingFromRemote) return;
-        
+      async function syncPiece(index, pieceEl) {
+        if (isUpdatingFromServer) return;
+
         const pieceData = {
           left: parseFloat(pieceEl.style.left),
           top: parseFloat(pieceEl.style.top),
           angle: parseFloat(pieceEl.dataset.angle)
         };
-        
-        // Y.js sincroniza automáticamente con todos
-        ymap.set(String(index), pieceData);
+
+        try {
+          const { error } = await supabase
+            .from('pieces')
+            .update(pieceData)
+            .eq('piece_index', index);
+
+          if (error) throw error;
+        } catch (error) {
+          console.error('Error sincronizando pieza:', error);
+        }
       }
 
       /**
-       * Actualiza una pieza cuando otro usuario la mueve
+       * Actualiza una pieza desde datos remotos
        */
-      function updatePieceFromRemote(i, pieceData) {
+      function updatePieceFromServer(i, pieceData) {
         if (pieces[i]) {
           pieces[i].style.left = pieceData.left + 'px';
           pieces[i].style.top = pieceData.top + 'px';
@@ -417,43 +424,75 @@
       }
 
       // ========================================
-      // ESCUCHAR CAMBIOS REMOTOS
+      // SUSCRIPCIÓN A CAMBIOS EN TIEMPO REAL
       // ========================================
-      
-      ymap.observe((event) => {
-        isUpdatingFromRemote = true;
-        event.changes.keys.forEach((change, key) => {
-          const i = parseInt(key);
-          const pieceData = ymap.get(key);
-          if (pieceData) {
-            updatePieceFromRemote(i, pieceData);
+
+      supabase
+        .channel('pieces-channel')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'pieces' },
+          (payload) => {
+            isUpdatingFromServer = true;
+            const piece = payload.new;
+            updatePieceFromServer(piece.piece_index, piece);
+            setTimeout(() => { isUpdatingFromServer = false; }, 100);
           }
-        });
-        setTimeout(() => { isUpdatingFromRemote = false; }, 50);
-      });
+        )
+        .subscribe();
 
       // ========================================
-      // CREAR PIEZAS INICIALES
+      // INICIALIZACIÓN
       // ========================================
-      
-      for (let i = 0; i < 4; i++) {
-        const state = ymap.get(String(i)) || initialState[i];
-        createPiece(i, state);
+
+      async function init() {
+        try {
+          statusDot.className = 'status connecting';
+          statusText.textContent = 'Conectando...';
+
+          // Inicializar base de datos y obtener estado
+          const state = await initializeDatabase();
+
+          // Crear las piezas
+          for (let i = 0; i < 4; i++) {
+            createPiece(i, state[i]);
+          }
+
+          statusDot.className = 'status online';
+          statusText.textContent = 'Todos pueden mover y rotar las piezas en tiempo real.';
+        } catch (error) {
+          console.error('Error de inicialización:', error);
+          statusDot.className = 'status offline';
+          statusText.textContent = 'Error de conexión';
+        }
       }
 
       // ========================================
       // BOTÓN DE RESET
       // ========================================
 
-      document.getElementById('btnReset').addEventListener('click', () => {
-        initialState.forEach((state, i) => {
-          ymap.set(String(i), state);
-        });
+      document.getElementById('btnReset').addEventListener('click', async () => {
+        try {
+          for (let i = 0; i < 4; i++) {
+            const { error } = await supabase
+              .from('pieces')
+              .update({
+                left: initialState[i].left,
+                top: initialState[i].top,
+                angle: initialState[i].angle
+              })
+              .eq('piece_index', i);
+
+            if (error) throw error;
+          }
+        } catch (error) {
+          console.error('Error reseteando:', error);
+        }
       });
+
+      // Iniciar la aplicación
+      init();
 
     })();
   </script>
 </body>
 </html>
-
-
