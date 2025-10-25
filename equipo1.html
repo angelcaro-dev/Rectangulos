@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Equipo 1 — Colaborativo (con fallback)</title>
-  <!-- Carga principal (jsDelivr) -->
-  <script src="https://cdn.jsdelivr.net/npm/yjs@13.6.19/dist/yjs.js" onerror="window.__YJS_ERR=1"></script>
-  <script src="https://cdn.jsdelivr.net/npm/y-webrtc@10.6.6/dist/y-webrtc.js" onerror="window.__YWE_ERR=1"></script>
+  <title>Equipo 1 — Colaborativo (fixed)</title>
+  <!-- Carga principal (jsDelivr) con @latest -->
+  <script src="https://cdn.jsdelivr.net/npm/yjs@latest/dist/yjs.js" onerror="window.__YJS_ERR=1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/y-webrtc@latest/dist/y-webrtc.js" onerror="window.__YWE_ERR=1"></script>
   <style>
     :root{ --radius: 0px; }
     *{ box-sizing:border-box; }
@@ -51,7 +51,6 @@
 
     function setStatus(text, cls){ statusEl.textContent = text; statusEl.className = 'pill ' + (cls||''); }
 
-    // Datos iniciales (usados en modo colab y en modo fallback)
     const defaults = [
       ["box1",{x:60,y:60,w:240,h:140,title:"Rectángulo 1",text:"Doble clic para editar"}],
       ["box2",{x:340,y:80,w:260,h:160,title:"Rectángulo 2",text:"Mover = barra superior"}],
@@ -71,7 +70,6 @@
         el.querySelector('.content').textContent = d.text;
         board.appendChild(el);
 
-        // Arrastrar local (no sincroniza, solo para que se vea algo)
         let drag=false, sx=0, sy=0, sl=0, st=0;
         const hd = el.querySelector('.header');
         hd.addEventListener('pointerdown', (e)=>{ drag=true; el.classList.add('dragging'); sx=e.clientX; sy=e.clientY; sl=parseFloat(el.style.left||0); st=parseFloat(el.style.top||0); e.preventDefault(); });
@@ -170,23 +168,23 @@
       updPeers();
     }
 
-    // Si se pide modo solo (offline), fuerza estático
+    // Forzar modo local si ?solo
     if (new URLSearchParams(location.search).has('solo')) {
       setStatus('Modo solo (forzado por ?solo)', 'warn'); mountStatic(); return;
     }
 
-    // Intento 1: librerías ya cargadas
+    // Si ya están las libs
     if (window.Y && window.ywebrtc){ setStatus('Librerías cargadas', 'ok'); initCollab(); return; }
 
-    // Intento 2: fallback a unpkg si jsDelivr falla
+    // Fallback a unpkg @latest
     setStatus('Cargando librerías…', '');
     const head = document.head;
     function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; head.appendChild(s); }); }
 
     (async function(){
       try{
-        if(!window.Y){ await loadScript('https://unpkg.com/yjs@13.6.19/dist/yjs.js'); }
-        if(!window.ywebrtc){ await loadScript('https://unpkg.com/y-webrtc@10.6.6/dist/y-webrtc.js'); }
+        if(!window.Y){ await loadScript('https://unpkg.com/yjs@latest/dist/yjs.js'); }
+        if(!window.ywebrtc){ await loadScript('https://unpkg.com/y-webrtc@latest/dist/y-webrtc.js'); }
       }catch(e){ /* ignore */ }
       if(window.Y && window.ywebrtc){ setStatus('Librerías cargadas', 'ok'); initCollab(); }
       else{ setStatus('No se pudieron cargar librerías (usando fallback sin colaboración)', 'err'); mountStatic(); }
