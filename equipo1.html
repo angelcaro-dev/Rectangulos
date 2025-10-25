@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Equipo 1 — Colaborativo</title>
+  <script src="https://cdn.jsdelivr.net/npm/yjs@13.6.19/dist/yjs.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/y-webrtc@10.6.6/dist/y-webrtc.js"></script>
+  <style>
+    :root{ --radius: 0px; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial, sans-serif; background:#0b0e13; color:#e5e7eb; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border-bottom:1px solid #232734; background:#0f1219; }
+    header h1{ margin:0; font-size:18px; }
+    .pill{ border:1px solid #2a2f3a; padding:6px 10px; border-radius: var(--radius); color:#9aa2b2; }
+    .container{ position:relative; width:100%; height: calc(100vh - 58px); overflow:auto; }
+    .board{ position:relative; width:1600px; height:1000px; }
+    .hint{ position:absolute; left:12px; bottom:12px; font-size:12px; color:#9aa2b2; background:#0f1219; border:1px solid #232734; padding:6px 8px; border-radius:var(--radius); }
+    .box{ position:absolute; min-width:180px; min-height:110px; border:1px solid #2a2f3a; background:#111525; border-radius: var(--radius); user-select:none; }
+    .box .header{ cursor:grab; padding:8px 10px; font-weight:600; border-bottom:1px solid #232734; background:#121723; }
+    .box.dragging .header{ cursor:grabbing; }
+    .box .content{ padding:10px; color:#c8ceda; }
+    .box .content[contenteditable="true"]{ outline:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Equipo 1 — Colaborativo</h1>
+    <span class="pill" id="peers">Conectados: 1</span>
+  </header>
+
+  <div class="container">
+    <div id="board" class="board"></div>
+    <div class="hint">Arrastra por la barra superior · Doble clic para editar · Todos ven los cambios en tiempo real</div>
+  </div>
+
+  <script>
+    (function(){
+      const ROOM = "equipo1";
+      const Y = window.Y;
+      const ywebrtc = window.ywebrtc;
+      const ydoc = new Y.Doc();
+      const provider = new ywebrtc.WebrtcProvider("rectangulos-" + ROOM, ydoc, { 
+        signaling: ["wss://signaling.yjs.dev"]
+      });
+      const awareness = provider.awareness;
+      const boxes = ydoc.getMap("boxes");
+      const board = document.getElementById("board");
+
+      Y.transact(ydoc, () => {
+        if (boxes.size === 0) {
+          [["box1",{x:60,y:60,w:240,h:140,title:"Rectángulo 1",text:"Doble clic para editar"}],
+           ["box2",{x:340,y:80,w:260,h:160,title:"Rectángulo 2",text:"Mover = barra superior"}],
+           ["box3",{x:80,y:280,w:260,h:150,title:"Rectángulo 3",text:"Esquinas en pico"}]
+          ].forEach(([id,d]) => {
+            const m = new Y.Map();
+            m.set("x",d.x); m.set("y",d.y); m.set("w",d.w); m.set("h",d.h);
+            m.set("title",d.title); m.set("text",d.text);
+            boxes.set(id,m);
+          });
+        }
+      });
+
+      function mountBox(id, ymap){
+        let el = document.getElementById(id);
+        if(!el){
+          el = document.createElement('div');
+          el.id = id; el.className = 'box';
+          el.innerHTML = '<div class="header"></div><div class="content" contenteditable="false"></div>';
+          board.appendChild(el);
+
+          let drag=false, sx=0, sy=0, sl=0, st=0;
+          const hd = el.querySelector('.header');
+
+          hd.addEventListener('pointerdown', (e)=>{
+            drag=true; el.classList.add('dragging');
+            sx=e.clientX; sy=e.clientY;
+            sl=parseFloat(el.style.left||0); st=parseFloat(el.style.top||0);
+            e.preventDefault();
+          });
+          window.addEventListener('pointermove', (e)=>{
+            if(!drag) return;
+            const nx = sl + (e.clientX - sx);
+            const ny = st + (e.clientY - sy);
+            el.style.left = nx + 'px';
+            el.style.top  = ny + 'px';
+            ymap.set('x', nx); ymap.set('y', ny);
+          });
+          window.addEventListener('pointerup', ()=>{ drag=false; el.classList.remove('dragging'); });
+
+          const ct = el.querySelector('.content');
+          ct.addEventListener('dblclick', ()=>{ ct.setAttribute('contenteditable','true'); ct.focus(); document.execCommand('selectAll', false, null); });
+          ct.addEventListener('blur', ()=>{ ct.removeAttribute('contenteditable'); ymap.set('text', ct.innerText); });
+          ct.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ct.blur(); }});
+
+          ymap.observe(()=> apply(el, ymap));
+        }
+        apply(el, ymap);
+      }
+
+      function apply(el, ymap){
+        el.style.left = (ymap.get('x')||0) + 'px';
+        el.style.top  = (ymap.get('y')||0) + 'px';
+        el.style.width  = (ymap.get('w')||200) + 'px';
+        el.style.height = (ymap.get('h')||120) + 'px';
+        el.querySelector('.header').textContent = ymap.get('title') || 'Rectángulo';
+        el.querySelector('.content').textContent = ymap.get('text') || '';
+      }
+
+      function fullRender(){
+        boxes.forEach((m,id)=> mountBox(id,m));
+        Array.from(board.children).forEach(el => { if(!boxes.has(el.id)) el.remove(); });
+      }
+      boxes.observe(fullRender);
+      fullRender();
+
+      function updPeers(){ document.getElementById('peers').textContent = 'Conectados: ' + awareness.getStates().size; }
+      awareness.on('change', updPeers); updPeers();
+
+      window.addEventListener('beforeunload', ()=> provider.destroy());
+    })();
+  </script>
+</body>
+</html>
