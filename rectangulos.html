@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>4 piezas – EQUIPO 1 (Colaborativo)</title>
   
-  <!-- Socket.IO para comunicación en tiempo real -->
-  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <!-- Y.js para sincronización automática en tiempo real -->
+  <script src="https://cdn.jsdelivr.net/npm/yjs@13.6.8/dist/yjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/y-webrtc@10.2.5/dist/y-webrtc.min.js"></script>
   
   <style>
     /* ========================================
@@ -116,10 +117,6 @@
       background: #f59e0b;
     }
 
-    .status.offline {
-      background: #ef4444;
-    }
-
     /* ========================================
        PIEZAS RECTANGULARES MOVIBLES
        ======================================== */
@@ -187,10 +184,10 @@
   <div class="toolbar">
     <button id="btnReset" class="pill">Reset ejercicio</button>
     <span class="msg">
-      <span class="status connecting" id="statusDot"></span>
-      <b>Modo colaborativo.</b> <span id="statusText">Conectando...</span>
+      <span class="status online" id="statusDot"></span>
+      <b>Modo colaborativo.</b> Todos pueden mover y rotar las piezas en tiempo real.
     </span>
-    <span class="badge">Sala: EQUIPO1 · <span id="userCount">-</span> conectados</span>
+    <span class="badge">Sala: EQUIPO1 · <span id="userCount">1</span> conectados</span>
   </div>
 
   <!-- Tablero donde se colocan las piezas -->
@@ -210,12 +207,11 @@
       // CONSTANTES Y CONFIGURACIÓN
       // ========================================
       
-      const ROOM = 'EQUIPO1'; // Nombre de la sala compartida
+      const ROOM = 'rectangulos-equipo1'; // Nombre único de la sala
       
       // Elementos del DOM
       const board = document.getElementById('board');
       const statusDot = document.getElementById('statusDot');
-      const statusText = document.getElementById('statusText');
       const userCount = document.getElementById('userCount');
 
       // Posiciones iniciales de las 4 piezas
@@ -227,86 +223,38 @@
       ];
 
       // ========================================
-      // VARIABLES DE ESTADO
+      // INICIALIZAR Y.JS PARA COLABORACIÓN
       // ========================================
       
-      const pieces = []; // Array con las piezas DOM
-      let isUpdatingFromServer = false; // Previene bucles infinitos
-      let socket; // Conexión Socket.IO
+      const ydoc = new Y.Doc();
+      const provider = new WebrtcProvider(ROOM, ydoc, {
+        signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com']
+      });
+      
+      const ymap = ydoc.getMap('pieces'); // Mapa compartido para las piezas
+      const pieces = []; // Array de elementos DOM
+      let isUpdatingFromRemote = false; // Previene bucles infinitos
 
       // ========================================
-      // CONEXIÓN AL SERVIDOR
+      // INICIALIZAR ESTADO SI ES EL PRIMERO
       // ========================================
       
-      try {
-        socket = io('https://socketio-chat-h9jt.herokuapp.com', {
-          transports: ['polling', 'websocket'],
-          reconnection: true,
-          reconnectionDelay: 1000,
-          reconnectionAttempts: 10
+      if (ymap.size === 0) {
+        initialState.forEach((state, i) => {
+          ymap.set(String(i), state);
         });
-      } catch(e) {
-        console.error('Error creando socket:', e);
-        statusDot.className = 'status offline';
-        statusText.textContent = 'Error de conexión';
       }
 
       // ========================================
-      // EVENTOS DEL SERVIDOR
+      // MONITOREAR CONEXIONES
       // ========================================
-
-      // Cuando nos conectamos al servidor
-      socket.on('connect', () => {
-        console.log('Conectado al servidor');
+      
+      provider.on('synced', () => {
         statusDot.className = 'status online';
-        statusText.textContent = 'Todos pueden mover y rotar las piezas en tiempo real.';
-        
-        // Unirse a la sala del equipo
-        socket.emit('join', ROOM);
-        
-        // Solicitar el estado actual de las piezas
-        socket.emit('request-state', ROOM);
       });
 
-      // Cuando nos desconectamos
-      socket.on('disconnect', () => {
-        statusDot.className = 'status offline';
-        statusText.textContent = 'Desconectado. Reintentando...';
-      });
-
-      // Actualizar contador de usuarios conectados
-      socket.on('user-count', (count) => {
-        userCount.textContent = count;
-      });
-
-      // Recibir el estado completo de las piezas
-      socket.on('state', (state) => {
-        if(pieces.length === 0) {
-          // Primera carga: crear las piezas
-          state.forEach((pieceState, i) => {
-            createPiece(i, pieceState);
-          });
-        } else {
-          // Actualizar piezas existentes
-          isUpdatingFromServer = true;
-          updatePiecesFromState(state);
-          setTimeout(() => { isUpdatingFromServer = false; }, 100);
-        }
-      });
-
-      // Recibir actualización de una sola pieza
-      socket.on('piece-update', (data) => {
-        if(isUpdatingFromServer) return;
-        isUpdatingFromServer = true;
-        updatePieceFromState(data.index, data.piece);
-        setTimeout(() => { isUpdatingFromServer = false; }, 100);
-      });
-
-      // Recibir comando de reset
-      socket.on('reset', () => {
-        isUpdatingFromServer = true;
-        updatePiecesFromState(initialState);
-        setTimeout(() => { isUpdatingFromServer = false; }, 100);
+      provider.on('peers', (peers) => {
+        userCount.textContent = peers.webrtcPeers.size + 1;
       });
 
       // ========================================
@@ -439,12 +387,12 @@
       // ========================================
 
       /**
-       * Envía la posición actualizada de una pieza al servidor
+       * Envía la posición actualizada de una pieza
        * @param {number} index - Índice de la pieza
        * @param {HTMLElement} pieceEl - Elemento DOM de la pieza
        */
       function syncPiece(index, pieceEl) {
-        if (isUpdatingFromServer) return; // No sincronizar si venimos del servidor
+        if (isUpdatingFromRemote) return;
         
         const pieceData = {
           left: parseFloat(pieceEl.style.left),
@@ -452,17 +400,14 @@
           angle: parseFloat(pieceEl.dataset.angle)
         };
         
-        socket.emit('piece-update', {
-          room: ROOM,
-          index: index,
-          piece: pieceData
-        });
+        // Y.js sincroniza automáticamente con todos
+        ymap.set(String(index), pieceData);
       }
 
       /**
-       * Actualiza una pieza específica desde el servidor
+       * Actualiza una pieza cuando otro usuario la mueve
        */
-      function updatePieceFromState(i, pieceData) {
+      function updatePieceFromRemote(i, pieceData) {
         if (pieces[i]) {
           pieces[i].style.left = pieceData.left + 'px';
           pieces[i].style.top = pieceData.top + 'px';
@@ -471,40 +416,39 @@
         }
       }
 
-      /**
-       * Actualiza todas las piezas desde el servidor
-       */
-      function updatePiecesFromState(state) {
-        pieces.forEach((p, i) => {
-          if (state[i]) {
-            p.style.left = state[i].left + 'px';
-            p.style.top = state[i].top + 'px';
-            p.dataset.angle = state[i].angle || 0;
-            setRotation(p, +p.dataset.angle);
+      // ========================================
+      // ESCUCHAR CAMBIOS REMOTOS
+      // ========================================
+      
+      ymap.observe((event) => {
+        isUpdatingFromRemote = true;
+        event.changes.keys.forEach((change, key) => {
+          const i = parseInt(key);
+          const pieceData = ymap.get(key);
+          if (pieceData) {
+            updatePieceFromRemote(i, pieceData);
           }
         });
+        setTimeout(() => { isUpdatingFromRemote = false; }, 50);
+      });
+
+      // ========================================
+      // CREAR PIEZAS INICIALES
+      // ========================================
+      
+      for (let i = 0; i < 4; i++) {
+        const state = ymap.get(String(i)) || initialState[i];
+        createPiece(i, state);
       }
-
-      // ========================================
-      // INICIALIZACIÓN
-      // ========================================
-
-      // Si no se recibe estado del servidor en 2 segundos, crear piezas localmente
-      setTimeout(() => {
-        if (pieces.length === 0) {
-          initialState.forEach((state, i) => {
-            createPiece(i, state);
-          });
-        }
-      }, 2000);
 
       // ========================================
       // BOTÓN DE RESET
       // ========================================
 
       document.getElementById('btnReset').addEventListener('click', () => {
-        socket.emit('reset', ROOM); // Notificar a todos
-        updatePiecesFromState(initialState); // Actualizar localmente
+        initialState.forEach((state, i) => {
+          ymap.set(String(i), state);
+        });
       });
 
     })();
