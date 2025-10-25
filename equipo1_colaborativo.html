@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>4 piezas – EQUIPO 1 (Colaborativo)</title>
+<style>
+  :root{
+    --bg:#f7f8fb; --grid: rgba(0,0,0,.05);
+    --piece:#cfecee; --stroke:#3a556a; --shadow: rgba(0,0,0,.08);
+  }
+  html,body{ height:100%; margin:0; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:var(--bg); }
+  .board{
+    position:absolute; inset:0; 
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:40px 40px; background-position: -1px -1px;
+  }
+  .toolbar{
+    position:fixed; top:10px; left:50%; transform:translateX(-50%);
+    display:flex; gap:10px; align-items:center; background:#fff;
+    border:1px solid #e6e6e6; border-radius:999px; box-shadow:0 8px 20px rgba(0,0,0,.06);
+    padding:6px 12px; font-size:14px; z-index:10; user-select:none;
+  }
+  .pill{ padding:6px 12px; border:1px solid #e6e6e6; border-radius:999px; background:#fff; cursor:pointer; }
+  .pill:hover{ background:#f5f5f5; }
+  .badge{ font-weight:600; color:#666; }
+  .msg{ padding:10px 14px; border:1px solid #e6e6e6; background:#fff; border-radius:12px; box-shadow:0 6px 16px rgba(0,0,0,.05); }
+  .msg b{ font-weight:700; }
+  .status{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .status.online{ background:#22c55e; }
+  .status.offline{ background:#ef4444; }
+
+  .piece{
+    position:absolute; left:0; top:0;
+    width:180px; height:120px;
+    background:var(--piece);
+    border:2px solid var(--stroke);
+    border-radius:0;
+    box-shadow: 0 10px 20px var(--shadow);
+    cursor:grab; touch-action:none; user-select:none;
+    transition: box-shadow 0.2s;
+  }
+  .piece:active{ cursor:grabbing; box-shadow: 0 15px 30px rgba(0,0,0,.15); }
+  .handle-rotate{
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom:-24px; width:16px; height:16px; border:2px solid var(--stroke);
+    border-radius:50%; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.1);
+    cursor:grab; touch-action:none;
+  }
+  .label{
+    position:fixed; left:16px; bottom:16px;
+    background:#000; color:#fff; font-weight:700; padding:10px 14px;
+    border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,.2); letter-spacing:.5px;
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="btnReset" class="pill">Reset ejercicio</button>
+    <span class="msg">
+      <span class="status" id="statusDot"></span>
+      <b>Modo colaborativo.</b> Todos pueden mover y rotar las piezas en tiempo real.
+    </span>
+    <span class="badge">Sala: equipo1 · <span id="userCount">...</span> conectados</span>
+  </div>
+  <div id="board" class="board"></div>
+  <div class="label">EQUIPO 1</div>
+
+<script>
+(function(){
+  const board = document.getElementById('board');
+  const statusDot = document.getElementById('statusDot');
+  const userCount = document.getElementById('userCount');
+
+  const STORAGE_KEY = 'equipo1:pieces';
+  const USERS_KEY = 'equipo1:users';
+  const MY_USER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
+
+  const initialState = [
+    { left: 120, top: 340, angle: 0 },
+    { left: 340, top: 340, angle: 0 },
+    { left: 560, top: 340, angle: 0 },
+    { left: 780, top: 340, angle: 0 },
+  ];
+
+  const pieces = [];
+  let isUpdating = false;
+
+  async function loadState() {
+    try {
+      const result = await window.storage.get(STORAGE_KEY, true);
+      if (result && result.value) {
+        return JSON.parse(result.value);
+      }
+    } catch (e) {
+      console.log('No saved state, using initial');
+    }
+    return initialState;
+  }
+
+  async function saveState(state) {
+    try {
+      await window.storage.set(STORAGE_KEY, JSON.stringify(state), true);
+    } catch (e) {
+      console.error('Error saving state:', e);
+    }
+  }
+
+  async function updatePresence() {
+    try {
+      await window.storage.set(USERS_KEY + ':' + MY_USER_ID, Date.now().toString(), true);
+    } catch (e) {
+      console.error('Error updating presence:', e);
+    }
+  }
+
+  async function getActiveUsers() {
+    try {
+      const result = await window.storage.list(USERS_KEY + ':', true);
+      if (!result || !result.keys) return 1;
+      
+      const now = Date.now();
+      let active = 0;
+      
+      for (const key of result.keys) {
+        try {
+          const userResult = await window.storage.get(key, true);
+          if (userResult && userResult.value) {
+            const lastSeen = parseInt(userResult.value);
+            if (now - lastSeen < 10000) {
+              active++;
+            }
+          }
+        } catch (e) {}
+      }
+      
+      return active || 1;
+    } catch (e) {
+      return 1;
+    }
+  }
+
+  function createPiece(i, state){
+    const p = document.createElement('div');
+    p.className = 'piece';
+    p.dataset.index = i;
+    p.dataset.angle = state[i].angle || 0;
+    p.style.left = state[i].left + 'px';
+    p.style.top  = state[i].top + 'px';
+    setRotation(p, +p.dataset.angle);
+
+    const h = document.createElement('div');
+    h.className = 'handle-rotate';
+    p.appendChild(h);
+
+    board.appendChild(p);
+
+    let dragging = false;
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+    p.addEventListener('pointerdown', (ev) => {
+      if (ev.target === h) return;
+      dragging = true;
+      p.setPointerCapture(ev.pointerId);
+      startX = ev.clientX; startY = ev.clientY;
+      startLeft = parseFloat(p.style.left); startTop = parseFloat(p.style.top);
+    });
+
+    p.addEventListener('pointermove', (ev) => {
+      if (!dragging) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      p.style.left = (startLeft + dx) + 'px';
+      p.style.top  = (startTop + dy) + 'px';
+    });
+
+    p.addEventListener('pointerup', async () => {
+      if (dragging) {
+        dragging = false;
+        await syncPieceToStorage(i, p);
+      }
+    });
+    
+    p.addEventListener('pointercancel', () => { dragging = false; });
+
+    let rotating = false;
+    let baseAngle = 0;
+    let startAngle = 0;
+
+    const angleFromPointer = (ev) => {
+      const rect = p.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180/Math.PI;
+      return ang;
+    };
+
+    h.addEventListener('pointerdown', (ev) => {
+      ev.stopPropagation();
+      rotating = true;
+      h.setPointerCapture(ev.pointerId);
+      baseAngle = +p.dataset.angle;
+      startAngle = angleFromPointer(ev);
+    });
+
+    h.addEventListener('pointermove', (ev) => {
+      if(!rotating) return;
+      const current = angleFromPointer(ev);
+      const diff = current - startAngle;
+      const newAng = baseAngle + diff;
+      p.dataset.angle = newAng;
+      setRotation(p, newAng);
+    });
+
+    h.addEventListener('pointerup', async () => {
+      if (rotating) {
+        rotating = false;
+        await syncPieceToStorage(i, p);
+      }
+    });
+    
+    h.addEventListener('pointercancel', () => { rotating = false; });
+
+    pieces.push(p);
+  }
+
+  async function syncPieceToStorage(index, pieceEl) {
+    if (isUpdating) return;
+    
+    try {
+      const state = await loadState();
+      state[index] = {
+        left: parseFloat(pieceEl.style.left),
+        top: parseFloat(pieceEl.style.top),
+        angle: parseFloat(pieceEl.dataset.angle)
+      };
+      await saveState(state);
+    } catch (e) {
+      console.error('Error syncing piece:', e);
+    }
+  }
+
+  function setRotation(el, deg){
+    el.style.transform = `rotate(${deg}deg)`;
+  }
+
+  async function updateFromStorage() {
+    if (isUpdating) return;
+    isUpdating = true;
+
+    try {
+      const state = await loadState();
+      pieces.forEach((p, i) => {
+        if (state[i]) {
+          p.style.left = state[i].left + 'px';
+          p.style.top = state[i].top + 'px';
+          p.dataset.angle = state[i].angle || 0;
+          setRotation(p, +p.dataset.angle);
+        }
+      });
+    } catch (e) {
+      console.error('Error updating from storage:', e);
+    } finally {
+      isUpdating = false;
+    }
+  }
+
+  async function updateUserCount() {
+    const count = await getActiveUsers();
+    userCount.textContent = count;
+    statusDot.className = 'status online';
+  }
+
+  (async function init() {
+    try {
+      const state = await loadState();
+      for(let i=0; i<4; i++) {
+        createPiece(i, state);
+      }
+
+      updatePresence();
+      setInterval(updatePresence, 5000);
+
+      updateUserCount();
+      setInterval(updateUserCount, 3000);
+
+      setInterval(updateFromStorage, 500);
+
+      statusDot.className = 'status online';
+    } catch (e) {
+      console.error('Initialization error:', e);
+      statusDot.className = 'status offline';
+    }
+  })();
+
+  document.getElementById('btnReset').addEventListener('click', async () => {
+    await saveState(initialState);
+    await updateFromStorage();
+  });
+})();
+</script>
+</body>
+</html>
