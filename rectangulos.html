@@ -1,305 +1,513 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>4 piezas – EQUIPO 1 (Colaborativo)</title>
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<style>
-  :root{
-    --bg:#f7f8fb; --grid: rgba(0,0,0,.05);
-    --piece:#cfecee; --stroke:#3a556a; --shadow: rgba(0,0,0,.08);
-  }
-  html,body{ height:100%; margin:0; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:var(--bg); }
-  .board{
-    position:absolute; inset:0; 
-    background-image:
-      linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size:40px 40px; background-position: -1px -1px;
-  }
-  .toolbar{
-    position:fixed; top:10px; left:50%; transform:translateX(-50%);
-    display:flex; gap:10px; align-items:center; background:#fff;
-    border:1px solid #e6e6e6; border-radius:999px; box-shadow:0 8px 20px rgba(0,0,0,.06);
-    padding:8px 16px; font-size:14px; z-index:10; user-select:none; flex-wrap: wrap;
-    max-width: 90%;
-  }
-  .pill{ padding:6px 12px; border:1px solid #e6e6e6; border-radius:999px; background:#fff; cursor:pointer; font-size:13px; }
-  .pill:hover{ background:#f5f5f5; }
-  .badge{ font-weight:600; color:#666; font-size:13px; }
-  .msg{ padding:8px 12px; border:1px solid #e6e6e6; background:#fff; border-radius:12px; box-shadow:0 6px 16px rgba(0,0,0,.05); font-size:13px; }
-  .msg b{ font-weight:700; }
-  .status{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
-  .status.online{ background:#22c55e; }
-  .status.offline{ background:#ef4444; }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4 piezas – EQUIPO 1 (Colaborativo)</title>
+  
+  <!-- Socket.IO para comunicación en tiempo real -->
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  
+  <style>
+    /* ========================================
+       VARIABLES DE DISEÑO
+       ======================================== */
+    :root {
+      --bg: #f7f8fb;
+      --grid: rgba(0, 0, 0, .05);
+      --piece: #cfecee;
+      --stroke: #3a556a;
+      --shadow: rgba(0, 0, 0, .08);
+    }
 
-  .piece{
-    position:absolute; left:0; top:0;
-    width:180px; height:120px;
-    background:var(--piece);
-    border:2px solid var(--stroke);
-    border-radius:0;
-    box-shadow: 0 10px 20px var(--shadow);
-    cursor:grab; touch-action:none; user-select:none;
-    transition: box-shadow 0.2s;
-  }
-  .piece:active{ cursor:grabbing; box-shadow: 0 15px 30px rgba(0,0,0,.15); }
-  .handle-rotate{
-    position:absolute; left:50%; transform:translateX(-50%);
-    bottom:-24px; width:16px; height:16px; border:2px solid var(--stroke);
-    border-radius:50%; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.1);
-    cursor:grab; touch-action:none;
-  }
-  .label{
-    position:fixed; left:16px; bottom:16px;
-    background:#000; color:#fff; font-weight:700; padding:10px 14px;
-    border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,.2); letter-spacing:.5px;
-  }
-  .room-id{
-    position:fixed; right:16px; bottom:16px;
-    background:#fff; color:#000; font-weight:600; padding:8px 12px;
-    border-radius:8px; border:2px solid #000; font-size:12px; font-family: monospace;
-  }
-</style>
+    /* ========================================
+       ESTILOS BASE
+       ======================================== */
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+    }
+
+    /* ========================================
+       TABLERO CON CUADRÍCULA
+       ======================================== */
+    .board {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: -1px -1px;
+    }
+
+    /* ========================================
+       BARRA DE HERRAMIENTAS SUPERIOR
+       ======================================== */
+    .toolbar {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: #fff;
+      border: 1px solid #e6e6e6;
+      border-radius: 999px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, .06);
+      padding: 8px 16px;
+      font-size: 14px;
+      z-index: 10;
+      user-select: none;
+      flex-wrap: wrap;
+      max-width: 90%;
+    }
+
+    .pill {
+      padding: 6px 12px;
+      border: 1px solid #e6e6e6;
+      border-radius: 999px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .pill:hover {
+      background: #f5f5f5;
+    }
+
+    .badge {
+      font-weight: 600;
+      color: #666;
+      font-size: 13px;
+    }
+
+    .msg {
+      padding: 8px 12px;
+      border: 1px solid #e6e6e6;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, .05);
+      font-size: 13px;
+    }
+
+    .msg b {
+      font-weight: 700;
+    }
+
+    /* Indicadores de estado de conexión */
+    .status {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+
+    .status.online {
+      background: #22c55e;
+    }
+
+    .status.connecting {
+      background: #f59e0b;
+    }
+
+    .status.offline {
+      background: #ef4444;
+    }
+
+    /* ========================================
+       PIEZAS RECTANGULARES MOVIBLES
+       ======================================== */
+    .piece {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 180px;
+      height: 120px;
+      background: var(--piece);
+      border: 2px solid var(--stroke);
+      border-radius: 0;
+      box-shadow: 0 10px 20px var(--shadow);
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      transition: box-shadow 0.2s;
+    }
+
+    .piece:active {
+      cursor: grabbing;
+      box-shadow: 0 15px 30px rgba(0, 0, 0, .15);
+    }
+
+    /* Círculo para rotar las piezas */
+    .handle-rotate {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: -24px;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--stroke);
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .1);
+      cursor: grab;
+      touch-action: none;
+    }
+
+    /* ========================================
+       ETIQUETA DE EQUIPO
+       ======================================== */
+    .label {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      background: #000;
+      color: #fff;
+      font-weight: 700;
+      padding: 10px 14px;
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, .2);
+      letter-spacing: .5px;
+    }
+  </style>
 </head>
+
 <body>
+  <!-- ========================================
+       INTERFAZ DE USUARIO
+       ======================================== -->
+  
+  <!-- Barra de herramientas superior -->
   <div class="toolbar">
     <button id="btnReset" class="pill">Reset ejercicio</button>
     <span class="msg">
-      <span class="status online" id="statusDot"></span>
-      <b>Modo colaborativo.</b> Todos pueden mover y rotar las piezas en tiempo real.
+      <span class="status connecting" id="statusDot"></span>
+      <b>Modo colaborativo.</b> <span id="statusText">Conectando...</span>
     </span>
-    <span class="badge">Sala: EQUIPO1 · <span id="userCount">1</span> conectados</span>
+    <span class="badge">Sala: EQUIPO1 · <span id="userCount">-</span> conectados</span>
   </div>
+
+  <!-- Tablero donde se colocan las piezas -->
   <div id="board" class="board"></div>
+
+  <!-- Etiqueta identificativa del equipo -->
   <div class="label">EQUIPO 1</div>
-  <div class="room-id">Sala: <span id="roomDisplay">EQUIPO1</span></div>
 
-<script>
-(function(){
-  const ROOM = 'EQUIPO1';
-  const board = document.getElementById('board');
-  const statusDot = document.getElementById('statusDot');
-  const userCount = document.getElementById('userCount');
+  <!-- ========================================
+       LÓGICA DE LA APLICACIÓN
+       ======================================== -->
+  <script>
+    (function() {
+      'use strict';
 
-  const initialState = [
-    { left: 120, top: 340, angle: 0 },
-    { left: 340, top: 340, angle: 0 },
-    { left: 560, top: 340, angle: 0 },
-    { left: 780, top: 340, angle: 0 },
-  ];
+      // ========================================
+      // CONSTANTES Y CONFIGURACIÓN
+      // ========================================
+      
+      const ROOM = 'EQUIPO1'; // Nombre de la sala compartida
+      
+      // Elementos del DOM
+      const board = document.getElementById('board');
+      const statusDot = document.getElementById('statusDot');
+      const statusText = document.getElementById('statusText');
+      const userCount = document.getElementById('userCount');
 
-  let state = JSON.parse(localStorage.getItem('pieces_' + ROOM)) || [...initialState];
-  const pieces = [];
-  let isUpdatingFromPeer = false;
-  
-  const peer = new Peer('rectangulos-' + ROOM + '-' + Math.random().toString(36).substr(2, 6));
-  const connections = new Set();
+      // Posiciones iniciales de las 4 piezas
+      const initialState = [
+        { left: 120, top: 340, angle: 0 },
+        { left: 340, top: 340, angle: 0 },
+        { left: 560, top: 340, angle: 0 },
+        { left: 780, top: 340, angle: 0 },
+      ];
 
-  peer.on('open', (id) => {
-    console.log('Mi ID:', id);
-    statusDot.className = 'status online';
-    
-    peer.on('connection', (conn) => {
-      setupConnection(conn);
-    });
+      // ========================================
+      // VARIABLES DE ESTADO
+      // ========================================
+      
+      const pieces = []; // Array con las piezas DOM
+      let isUpdatingFromServer = false; // Previene bucles infinitos
+      let socket; // Conexión Socket.IO
 
-    connectToRoom();
-  });
-
-  function connectToRoom() {
-    const baseId = 'rectangulos-' + ROOM;
-    for(let i = 0; i < 10; i++) {
-      const targetId = baseId + '-' + i.toString(36);
-      if(targetId !== peer.id) {
-        try {
-          const conn = peer.connect(targetId);
-          setupConnection(conn);
-        } catch(e) {}
+      // ========================================
+      // CONEXIÓN AL SERVIDOR
+      // ========================================
+      
+      try {
+        socket = io('https://socketio-chat-h9jt.herokuapp.com', {
+          transports: ['polling', 'websocket'],
+          reconnection: true,
+          reconnectionDelay: 1000,
+          reconnectionAttempts: 10
+        });
+      } catch(e) {
+        console.error('Error creando socket:', e);
+        statusDot.className = 'status offline';
+        statusText.textContent = 'Error de conexión';
       }
-    }
-  }
 
-  function setupConnection(conn) {
-    connections.add(conn);
-    
-    conn.on('open', () => {
-      console.log('Conectado a:', conn.peer);
-      userCount.textContent = connections.size + 1;
-      conn.send({ type: 'state', state });
-    });
+      // ========================================
+      // EVENTOS DEL SERVIDOR
+      // ========================================
 
-    conn.on('data', (data) => {
-      if(data.type === 'state') {
-        isUpdatingFromPeer = true;
-        state = data.state;
-        updatePiecesFromState();
-        setTimeout(() => { isUpdatingFromPeer = false; }, 100);
-      } else if(data.type === 'update') {
-        isUpdatingFromPeer = true;
-        state[data.index] = data.piece;
-        updatePieceFromState(data.index);
-        setTimeout(() => { isUpdatingFromPeer = false; }, 100);
-      } else if(data.type === 'reset') {
-        isUpdatingFromPeer = true;
-        state = [...initialState];
-        updatePiecesFromState();
-        setTimeout(() => { isUpdatingFromPeer = false; }, 100);
+      // Cuando nos conectamos al servidor
+      socket.on('connect', () => {
+        console.log('Conectado al servidor');
+        statusDot.className = 'status online';
+        statusText.textContent = 'Todos pueden mover y rotar las piezas en tiempo real.';
+        
+        // Unirse a la sala del equipo
+        socket.emit('join', ROOM);
+        
+        // Solicitar el estado actual de las piezas
+        socket.emit('request-state', ROOM);
+      });
+
+      // Cuando nos desconectamos
+      socket.on('disconnect', () => {
+        statusDot.className = 'status offline';
+        statusText.textContent = 'Desconectado. Reintentando...';
+      });
+
+      // Actualizar contador de usuarios conectados
+      socket.on('user-count', (count) => {
+        userCount.textContent = count;
+      });
+
+      // Recibir el estado completo de las piezas
+      socket.on('state', (state) => {
+        if(pieces.length === 0) {
+          // Primera carga: crear las piezas
+          state.forEach((pieceState, i) => {
+            createPiece(i, pieceState);
+          });
+        } else {
+          // Actualizar piezas existentes
+          isUpdatingFromServer = true;
+          updatePiecesFromState(state);
+          setTimeout(() => { isUpdatingFromServer = false; }, 100);
+        }
+      });
+
+      // Recibir actualización de una sola pieza
+      socket.on('piece-update', (data) => {
+        if(isUpdatingFromServer) return;
+        isUpdatingFromServer = true;
+        updatePieceFromState(data.index, data.piece);
+        setTimeout(() => { isUpdatingFromServer = false; }, 100);
+      });
+
+      // Recibir comando de reset
+      socket.on('reset', () => {
+        isUpdatingFromServer = true;
+        updatePiecesFromState(initialState);
+        setTimeout(() => { isUpdatingFromServer = false; }, 100);
+      });
+
+      // ========================================
+      // FUNCIONES AUXILIARES
+      // ========================================
+
+      /**
+       * Aplica rotación CSS a un elemento
+       * @param {HTMLElement} el - Elemento a rotar
+       * @param {number} deg - Grados de rotación
+       */
+      function setRotation(el, deg) {
+        el.style.transform = `rotate(${deg}deg)`;
       }
-    });
 
-    conn.on('close', () => {
-      connections.delete(conn);
-      userCount.textContent = connections.size + 1;
-    });
-  }
+      // ========================================
+      // CREACIÓN DE PIEZAS
+      // ========================================
 
-  function broadcast(data) {
-    connections.forEach(conn => {
-      if(conn.open) {
-        conn.send(data);
-      }
-    });
-  }
-
-  function setRotation(el, deg){
-    el.style.transform = `rotate(${deg}deg)`;
-  }
-
-  function createPiece(i){
-    const p = document.createElement('div');
-    p.className = 'piece';
-    p.dataset.index = i;
-    p.dataset.angle = state[i].angle || 0;
-    p.style.left = state[i].left + 'px';
-    p.style.top  = state[i].top + 'px';
-    setRotation(p, +p.dataset.angle);
-
-    const h = document.createElement('div');
-    h.className = 'handle-rotate';
-    p.appendChild(h);
-
-    board.appendChild(p);
-
-    let dragging = false;
-    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
-
-    p.addEventListener('pointerdown', (ev) => {
-      if (ev.target === h) return;
-      dragging = true;
-      p.setPointerCapture(ev.pointerId);
-      startX = ev.clientX; startY = ev.clientY;
-      startLeft = parseFloat(p.style.left); startTop = parseFloat(p.style.top);
-    });
-
-    p.addEventListener('pointermove', (ev) => {
-      if (!dragging) return;
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      p.style.left = (startLeft + dx) + 'px';
-      p.style.top  = (startTop + dy) + 'px';
-    });
-
-    p.addEventListener('pointerup', () => {
-      if (dragging) {
-        dragging = false;
-        syncPiece(i, p);
-      }
-    });
-    
-    p.addEventListener('pointercancel', () => { dragging = false; });
-
-    let rotating = false;
-    let baseAngle = 0;
-    let startAngle = 0;
-
-    const angleFromPointer = (ev) => {
-      const rect = p.getBoundingClientRect();
-      const cx = rect.left + rect.width/2;
-      const cy = rect.top + rect.height/2;
-      const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180/Math.PI;
-      return ang;
-    };
-
-    h.addEventListener('pointerdown', (ev) => {
-      ev.stopPropagation();
-      rotating = true;
-      h.setPointerCapture(ev.pointerId);
-      baseAngle = +p.dataset.angle;
-      startAngle = angleFromPointer(ev);
-    });
-
-    h.addEventListener('pointermove', (ev) => {
-      if(!rotating) return;
-      const current = angleFromPointer(ev);
-      const diff = current - startAngle;
-      const newAng = baseAngle + diff;
-      p.dataset.angle = newAng;
-      setRotation(p, newAng);
-    });
-
-    h.addEventListener('pointerup', () => {
-      if (rotating) {
-        rotating = false;
-        syncPiece(i, p);
-      }
-    });
-    
-    h.addEventListener('pointercancel', () => { rotating = false; });
-
-    pieces.push(p);
-  }
-
-  function syncPiece(index, pieceEl) {
-    if (isUpdatingFromPeer) return;
-    
-    const pieceData = {
-      left: parseFloat(pieceEl.style.left),
-      top: parseFloat(pieceEl.style.top),
-      angle: parseFloat(pieceEl.dataset.angle)
-    };
-    
-    state[index] = pieceData;
-    localStorage.setItem('pieces_' + ROOM, JSON.stringify(state));
-    broadcast({ type: 'update', index, piece: pieceData });
-  }
-
-  function updatePieceFromState(i) {
-    if(pieces[i]) {
-      pieces[i].style.left = state[i].left + 'px';
-      pieces[i].style.top = state[i].top + 'px';
-      pieces[i].dataset.angle = state[i].angle || 0;
-      setRotation(pieces[i], +pieces[i].dataset.angle);
-    }
-  }
-
-  function updatePiecesFromState() {
-    pieces.forEach((p, i) => {
-      if (state[i]) {
-        p.style.left = state[i].left + 'px';
-        p.style.top = state[i].top + 'px';
-        p.dataset.angle = state[i].angle || 0;
+      /**
+       * Crea una pieza rectangular interactiva
+       * @param {number} i - Índice de la pieza
+       * @param {Object} state - Estado inicial {left, top, angle}
+       */
+      function createPiece(i, state) {
+        // Crear elemento de la pieza
+        const p = document.createElement('div');
+        p.className = 'piece';
+        p.dataset.index = i;
+        p.dataset.angle = state.angle || 0;
+        p.style.left = state.left + 'px';
+        p.style.top = state.top + 'px';
         setRotation(p, +p.dataset.angle);
+
+        // Crear manejador de rotación (círculo)
+        const h = document.createElement('div');
+        h.className = 'handle-rotate';
+        p.appendChild(h);
+
+        board.appendChild(p);
+
+        // ========================================
+        // ARRASTRE DE LA PIEZA
+        // ========================================
+        
+        let dragging = false;
+        let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+        p.addEventListener('pointerdown', (ev) => {
+          if (ev.target === h) return; // El círculo se maneja aparte
+          dragging = true;
+          p.setPointerCapture(ev.pointerId);
+          startX = ev.clientX;
+          startY = ev.clientY;
+          startLeft = parseFloat(p.style.left);
+          startTop = parseFloat(p.style.top);
+        });
+
+        p.addEventListener('pointermove', (ev) => {
+          if (!dragging) return;
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          p.style.left = (startLeft + dx) + 'px';
+          p.style.top = (startTop + dy) + 'px';
+        });
+
+        p.addEventListener('pointerup', () => {
+          if (dragging) {
+            dragging = false;
+            syncPiece(i, p); // Sincronizar con otros usuarios
+          }
+        });
+
+        p.addEventListener('pointercancel', () => {
+          dragging = false;
+        });
+
+        // ========================================
+        // ROTACIÓN DE LA PIEZA
+        // ========================================
+        
+        let rotating = false;
+        let baseAngle = 0;
+        let startAngle = 0;
+
+        /**
+         * Calcula el ángulo desde el centro de la pieza hasta el puntero
+         */
+        const angleFromPointer = (ev) => {
+          const rect = p.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI;
+          return ang;
+        };
+
+        h.addEventListener('pointerdown', (ev) => {
+          ev.stopPropagation();
+          rotating = true;
+          h.setPointerCapture(ev.pointerId);
+          baseAngle = +p.dataset.angle;
+          startAngle = angleFromPointer(ev);
+        });
+
+        h.addEventListener('pointermove', (ev) => {
+          if (!rotating) return;
+          const current = angleFromPointer(ev);
+          const diff = current - startAngle;
+          const newAng = baseAngle + diff;
+          p.dataset.angle = newAng;
+          setRotation(p, newAng);
+        });
+
+        h.addEventListener('pointerup', () => {
+          if (rotating) {
+            rotating = false;
+            syncPiece(i, p); // Sincronizar con otros usuarios
+          }
+        });
+
+        h.addEventListener('pointercancel', () => {
+          rotating = false;
+        });
+
+        pieces.push(p);
       }
-    });
-    localStorage.setItem('pieces_' + ROOM, JSON.stringify(state));
-  }
 
-  for(let i=0; i<4; i++) {
-    createPiece(i);
-  }
+      // ========================================
+      // SINCRONIZACIÓN CON OTROS USUARIOS
+      // ========================================
 
-  document.getElementById('btnReset').addEventListener('click', () => {
-    state = [...initialState];
-    updatePiecesFromState();
-    broadcast({ type: 'reset' });
-  });
+      /**
+       * Envía la posición actualizada de una pieza al servidor
+       * @param {number} index - Índice de la pieza
+       * @param {HTMLElement} pieceEl - Elemento DOM de la pieza
+       */
+      function syncPiece(index, pieceEl) {
+        if (isUpdatingFromServer) return; // No sincronizar si venimos del servidor
+        
+        const pieceData = {
+          left: parseFloat(pieceEl.style.left),
+          top: parseFloat(pieceEl.style.top),
+          angle: parseFloat(pieceEl.dataset.angle)
+        };
+        
+        socket.emit('piece-update', {
+          room: ROOM,
+          index: index,
+          piece: pieceData
+        });
+      }
 
-  setInterval(() => {
-    userCount.textContent = connections.size + 1;
-  }, 2000);
-})();
-</script>
+      /**
+       * Actualiza una pieza específica desde el servidor
+       */
+      function updatePieceFromState(i, pieceData) {
+        if (pieces[i]) {
+          pieces[i].style.left = pieceData.left + 'px';
+          pieces[i].style.top = pieceData.top + 'px';
+          pieces[i].dataset.angle = pieceData.angle || 0;
+          setRotation(pieces[i], +pieces[i].dataset.angle);
+        }
+      }
+
+      /**
+       * Actualiza todas las piezas desde el servidor
+       */
+      function updatePiecesFromState(state) {
+        pieces.forEach((p, i) => {
+          if (state[i]) {
+            p.style.left = state[i].left + 'px';
+            p.style.top = state[i].top + 'px';
+            p.dataset.angle = state[i].angle || 0;
+            setRotation(p, +p.dataset.angle);
+          }
+        });
+      }
+
+      // ========================================
+      // INICIALIZACIÓN
+      // ========================================
+
+      // Si no se recibe estado del servidor en 2 segundos, crear piezas localmente
+      setTimeout(() => {
+        if (pieces.length === 0) {
+          initialState.forEach((state, i) => {
+            createPiece(i, state);
+          });
+        }
+      }, 2000);
+
+      // ========================================
+      // BOTÓN DE RESET
+      // ========================================
+
+      document.getElementById('btnReset').addEventListener('click', () => {
+        socket.emit('reset', ROOM); // Notificar a todos
+        updatePiecesFromState(initialState); // Actualizar localmente
+      });
+
+    })();
+  </script>
 </body>
 </html>
